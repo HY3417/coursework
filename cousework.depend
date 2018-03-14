@@ -1,0 +1,7 @@
+# depslib dependency file v1.0
+1520976434 source:/home/hy3417/Desktop/coursework/cousework/main.cpp
+	<iostream>
+	<iomanip>
+	<cmath>
+	<cblas.h>
+
