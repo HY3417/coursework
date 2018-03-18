@@ -111,15 +111,15 @@ for(int i = 0; i < nelem_y + 1; i++){
     }
 }
 
-double vCoord[144][2];  // Coordinate of the nodes [x, y]
-for(int i = 0; i < 9; i++){
-    for(int j = 0; j < 16; j++){
-       vCoord[j*9 + i][0] = vX[j];
+double vCoord[nnode][2];  // Coordinate of the nodes [x, y]
+for(int i = 0; i < nelem_y + 1; i++){
+    for(int j = 0; j < nelem_x + 1; j++){
+       vCoord[j*(nelem_y + 1) + i][0] = vX[j];
     }
 }
-for(int j = 0; j < 16; j++){
-    for(int i = 0; i < 9; i++){
-       vCoord[j*9 + i][1] = vY[i][j];
+for(int j = 0; j < nelem_x + 1; j++){
+    for(int i = 0; i < nelem_y + 1; i++){
+       vCoord[j*(nelem_y + 1) + i][1] = vY[i][j];
     }
 }
 
@@ -129,14 +129,14 @@ for(int j = 0; j < 16; j++){
 int vNodeTopo[nelem_y + 1][nelem_x+1];
 for(int i = 0; i < nelem_y + 1; i++){
     for(int j = 0; j < nelem_x + 1; j++){
-       vNodeTopo[i][j] = j * 9 + i;
+       vNodeTopo[i][j] = j * (nelem_y + 1) + i;
     }
 }
 
 /**
 * Calculation of topology matrix Elemnode
 */
-int vElemNode[nelem][5];
+int vElemNode[nelem][nnode_elem+1];
 int elemnr = 0;
 for(int colnr = 0; colnr < nelem_x; colnr++){
     for(int rownr = 0; rownr < nelem_y; rownr++){
@@ -151,14 +151,14 @@ for(int colnr = 0; colnr < nelem_x; colnr++){
 
 double vElemX[nelem][nnode_elem];  // Element x nodal coordinates
 for(int i = 0; i < nelem; i++){
-    for(int j =1; j < 5; j++){
+    for(int j =1; j < nnode_elem + 1; j++){
     vElemX[i][j-1] = vCoord[vElemNode[i][j]][0];
     }
 }
 
 double vElemY[nelem][nnode_elem];  // Element y nodal coordinates
 for(int i = 0; i < nelem; i++){
-    for(int j =1; j < 5; j++){
+    for(int j =1; j < nnode_elem + 1; j++){
     vElemY[i][j-1] = vCoord[vElemNode[i][j]][1];
     }
 }
@@ -203,7 +203,7 @@ for(int i = 0; i < nelem; i++){
     double eCoord[nnode_elem*gauss] = {}; // node coordinates
 
     int iCoord = 0;
-    for(int index = 1; index < 5; index++){
+    for(int index = 1; index < nnode_elem + 1; index++){
 
         vNodes[index-1] = vElemNode[i][index];
 
@@ -283,12 +283,109 @@ for(int i = 0; i < nelem; i++){
             vK[gDof[n]*nDof+gDof[k]] = vK[gDof[n]*nDof+gDof[k]] + vKe[n*nnode_elem+k];
             }
        }
+}
 
 
+/**
+*
+* CASE 1
+*
+*/
 
+/**
+* Compute nodal boundary flux vector
+* Natural boundary condition
+*/
+
+/**
+*Defined on edges
+*/
+int vFluxNodes[nelem_y + 1] = {};
+int nFluxNodes = 0;
+for(int i = 0; i < nelem_y + 1; i++){
+    vFluxNodes[i] = vNodeTopo[i][nelem_x];  // Nodes at the right edge of the beam
+    nFluxNodes += 1;  // Number of nodes on the right edge of the beam
+}
+
+/**
+*Defining load
+*/
+int q = 2500; // Constant flux at right edge of the beam
+double vN_bc[4][nFluxNodes-1];
+for(int i = 0; i < nFluxNodes - 1; i++){
+    vN_bc[0][i] = vFluxNodes[i];   // Node 1
+    vN_bc[1][i] = vFluxNodes[i+1]; // Node 2
+    vN_bc[2][i] = q; // Flux value at node 1
+    vN_bc[3][i] = q; // FLux value at node 2
+}
+
+double vF[nDof] = {}; // Initialize nodal flux vector
+for(int i = 0; i < nFluxNodes - 1; i++){
+    double vFq[2] = {}; // Initialize the nodal source vector
+
+    int node1; // First node
+    int node2; // Second node
+    node1 = vN_bc[0][i];
+    node2 = vN_bc[1][i];
+
+    double vN_bce[2] = {};
+    for(int m = 0; m < 2; m++){
+        vN_bce[m] = vN_bc[m+2][i]; // FLux value at an edge
+    }
+
+    double x1; // x coord of the first node
+    double x2; // x coord of the second node
+    double y1; // y coord of the first node
+    double y2; // y coord of the second node
+    x1 = vCoord[node1][0];
+    y1 = vCoord[node1][1];
+    x2 = vCoord[node2][0];
+    y2 = vCoord[node2][1];
+
+    double leng; // Edge length
+    double detJ; // 1D Jacobian
+    leng = sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+    detJ = leng / 2;
+
+    for(int j = 0; j < gauss; j++){ // Integrate in x direction (1D integration)
+        double x;
+        double vNN[2] = {}; // 1D shape functions in parent domain
+        double flux;
+        x = vGP[j];
+        vNN[0] = 0.5 * (1 - x);
+        vNN[1] = 0.5 * (1 + x);
+        flux = cblas_ddot(2, vNN, 1, vN_bce, 1);
+        vFq[0] = vFq[0] + vW[j] * vNN[0] * flux * detJ * th; // Nodal flux
+        vFq[1] = vFq[1] + vW[j] * vNN[1] * flux * detJ * th;
+    }
+
+    for(int j = 0; j < gauss; j++){
+        vFq[j] = -vFq[j]; // Define flux as negative integrals
+    }
+    vF[node1] += vFq[0];
+    vF[node2] += vFq[1];
 
 }
 
+/**
+*
+* Apply boundary conditions
+* Essential boundary conditions
+*
+*/
+int vTempNodes[nelem_y+1] = {};
+for(int i = 0; i < nelem_y+1; i++){
+    vTempNodes[i] = vNodeTopo[i][0]; // Nodes at the left edge of the beam
+}
+
+int nTempNodes = nelem_y + 1; // NUmber of nodes with temp boundary condition
+
+double vBC[nTempNodes*2] = {}; // Initialize the nodal temperature vector
+int T0 = 10; // Temperature at boundary
+for(int i = 0; i < nTempNodes; i++){
+    vBC[i * 2] = vTempNodes[i];
+    vBC[i * 2 + 1] = T0;
+}
 
 
 
