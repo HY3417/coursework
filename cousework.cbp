@@ -36,6 +36,12 @@
 			<Add library="lapack" />
 			<Add library="blas" />
 		</Linker>
+		<Unit filename="C1.cpp">
+			<Option target="&lt;{~None~}&gt;" />
+		</Unit>
+		<Unit filename="c2.cpp">
+			<Option target="&lt;{~None~}&gt;" />
+		</Unit>
 		<Unit filename="main.cpp" />
 		<Extensions>
 			<code_completion />

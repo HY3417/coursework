@@ -9,7 +9,18 @@
 using namespace std;
 
 #include <cblas.h>
+#define F77NAME(x) x##_
 
+/**
+*
+*LAPACK routine for solving systems of linear equations
+*
+*/
+extern "C"{
+    void F77NAME(dgesv)(const int& n, const int& nrhs, const double * A,
+                        const int& lda, int * ipiv, double * B,
+                        const int& ldb, int& info);
+}
 
 /**
  * @brief Prints a square matrix supplied in column-major full storage.
@@ -130,7 +141,9 @@ int vNodeTopo[nelem_y + 1][nelem_x+1];
 for(int i = 0; i < nelem_y + 1; i++){
     for(int j = 0; j < nelem_x + 1; j++){
        vNodeTopo[i][j] = j * (nelem_y + 1) + i;
+       //cout << setw(6) << vNodeTopo[i][j];
     }
+    //cout << endl;
 }
 
 /**
@@ -212,7 +225,7 @@ for(int i = 0; i < nelem; i++){
 
         iCoord = iCoord + 2;
     }
-    //cout << eCoord[0] << " " << eCoord[1] << " " << eCoord[2] << " " << eCoord[3] << " " << eCoord[4] << " " << eCoord[5] << " " << eCoord[6] << " " << eCoord[7] << endl;
+
     int gDof[nnode_elem];
     for(int j = 0; j < nnode_elem; j++){
         gDof[j] = vNodes[j]; // global dof for node j
@@ -285,13 +298,6 @@ for(int i = 0; i < nelem; i++){
        }
 }
 
-
-/**
-*
-* CASE 1
-*
-*/
-
 /**
 * Compute nodal boundary flux vector
 * Natural boundary condition
@@ -300,11 +306,11 @@ for(int i = 0; i < nelem; i++){
 /**
 *Defined on edges
 */
-int vFluxNodes[nelem_y + 1] = {};
+int vFluxNodes[nelem_x + 1] = {};
 int nFluxNodes = 0;
-for(int i = 0; i < nelem_y + 1; i++){
-    vFluxNodes[i] = vNodeTopo[i][nelem_x];  // Nodes at the right edge of the beam
-    nFluxNodes += 1;  // Number of nodes on the right edge of the beam
+for(int i = 0; i < nelem_x + 1; i++){
+    vFluxNodes[i] = vNodeTopo[nelem_y][i];  // Nodes at the top edge of the beam
+    nFluxNodes += 1;  // Number of nodes on the top edge of the beam
 }
 
 /**
@@ -373,12 +379,12 @@ for(int i = 0; i < nFluxNodes - 1; i++){
 * Essential boundary conditions
 *
 */
-int vTempNodes[nelem_y+1] = {};
-for(int i = 0; i < nelem_y+1; i++){
-    vTempNodes[i] = vNodeTopo[i][0]; // Nodes at the left edge of the beam
+int vTempNodes[nelem_x + 1] = {};
+for(int i = 0; i < nelem_x+1; i++){
+    vTempNodes[i] = vNodeTopo[0][i]; // Nodes at the bottom edge of the beam
 }
 
-int nTempNodes = nelem_y + 1; // NUmber of nodes with temp boundary condition
+int nTempNodes = nelem_x + 1; // NUmber of nodes with temp boundary condition
 
 double vBC[nTempNodes*2] = {}; // Initialize the nodal temperature vector
 int T0 = 10; // Temperature at boundary
@@ -387,7 +393,148 @@ for(int i = 0; i < nTempNodes; i++){
     vBC[i * 2 + 1] = T0;
 }
 
+/**
+*
+* Assembling global "Force" vector
+*
+*/
+int vOrgDof[nDof] = {}; // Original Dof number
+double vT[nDof] = {}; // Initialize nodal temperature vector
+int rDof = nDof; // Reduced number of DOF
 
+int vInd[nTempNodes] = {};
+for(int i = 0; i < nTempNodes; i++){
+    vInd[i] = vBC[i * 2];
+}
+for(int i = 0; i < nTempNodes; i++){
+    vOrgDof[vInd[i]] = -1;
+    vT[vInd[i]] = vBC[i * 2 + 1];
+}
 
+rDof = rDof - nTempNodes;
+
+int vRedDof[rDof] = {};
+int counter1 = 0;
+for(int j = 0; j < nDof; j++){
+    if(vOrgDof[j] == 0){
+        vOrgDof[j] = counter1;
+        vRedDof[counter1] = j;
+        counter1 += 1;
+    }
+}
+
+/**
+*
+*  Partition matrices
+*
+*/
+int mask_E = nTempNodes; // Known temperature Dof
+int mmask_E = nDof - nTempNodes;
+double vT_E[mask_E] = {};
+double vF_F[mmask_E] = {};
+double vK_EE[mask_E * mask_E] = {};
+double vK_FF[mmask_E * mmask_E] = {};
+double vK_EF[mask_E * mmask_E] = {};
+double vK_EFT[mmask_E * mask_E] = {};
+
+for(int i = 0; i < mask_E; i++){
+    vT_E[i] = vT[i * (nelem_y + 1)];
+}
+
+for(int i = 0; i < mask_E; i++){
+    vF_F[(i + 1) * nelem_y - 1] = vF[(i + 1) * (nelem_y + 1) - 1];
+}
+
+for(int i = 0; i < mask_E; i++){
+    for(int j = 0; j < mask_E; j++){
+        vK_EE[i * mask_E + j] = vK[i * nDof + j];
+        cout << setw(8) << vK_EE[i * mask_E + j];
+    }
+    cout << endl;
+    cout << endl;
+}
+
+for(int i = 0; i < mmask_E; i++){
+    for(int j = 0; j < mmask_E; j++){
+        vK_FF[i * mmask_E + j] = vK[(i + mask_E) * nDof + (j + mask_E)];
+    }
+}
+
+for(int i = 0; i < mask_E; i++){
+    for(int j = 0; j < mmask_E; j++){
+        vK_EF[i * mmask_E + j] = vK[i * nDof + (j + mask_E)];
+    }
+}
+
+for(int i = 0; i < mmask_E; i++){
+    for(int j = 0; j < mask_E; j++){
+        vK_EFT[i * mask_E + j] = vK_EF[j * mmask_E + i];
+    }
+}
+
+/**
+*
+* Solve for d_F
+*
+*/
+double vRhs[mmask_E] = {};
+double vA[mmask_E] = {};
+cblas_dgemv(CblasRowMajor, CblasNoTrans, mmask_E, mask_E, 1.0, vK_EFT, mask_E, vT_E, 1, 0.0, vA, 1);
+for(int i = 0; i < mmask_E; i++){
+    vRhs[i] = vF_F[i] - vA[i];
+}
+
+double vT_F[mmask_E] = {};
+int vIpiv[mmask_E] = {};
+int info = 0;
+F77NAME(dgesv)(mmask_E, 1, vK_FF, mmask_E, vIpiv, vRhs, mmask_E, info);
+for(int i = 0; i < mmask_E; i++){
+    vT_F[i] = vRhs[i];
+}
+
+/**
+*
+*Reconstruct the global displacement d
+*
+*/
+for(int i = 0; i < mask_E; i++){
+    vT[i] = vT_E[i];
+}
+for(int i = 0; i < mmask_E; i++){
+    vT[i + mask_E] = vT_F[i];
+}
+for(int i = 0; i < nDof; i++){
+    //cout << vT[i] << endl;
+}
+
+/**
+*
+*Compute the reaction f_E
+*
+*/
+double vB[mask_E];
+double vC[mask_E];
+double vF_E[mask_E];
+cblas_dgemv(CblasRowMajor, CblasNoTrans, mask_E, mask_E,1.0, vK_EE, mask_E, vT_E, 1, 0.0, vB, 1);
+cblas_dgemv(CblasRowMajor, CblasNoTrans, mask_E, mmask_E, 1.0, vK_EF, mmask_E, vT_F, 1, 0.0, vC, 1);
+for(int i = 0; i < mask_E; i++){
+    vF_E[i] = vB[i] + vC[i];
+}
+
+/**
+*
+*Reconstruct the global reactions f
+*
+*/
+for(int i = 0; i < mask_E; i++){
+    vF[i] = vF_E[i];
+}
+for(int i = 0; i < mmask_E; i++){
+    vF[i + mask_E] = vF_F[i];
+}
+
+for(int i = 0; i < nDof; i++){
+    //cout << vF[i] << endl;
+}
 return 0;
 }
