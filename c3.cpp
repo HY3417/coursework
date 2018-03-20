@@ -25,7 +25,7 @@ extern "C"{
                         const int& ldb, int& info);
 }
 
-int c2{
+int c1{
 /**
 * Compute nodal boundary flux vector
 * Natural boundary condition
@@ -34,17 +34,17 @@ int c2{
 /**
 *Defined on edges
 */
-int vFluxNodes[nelem_x + 1] = {};
+int vFluxNodes[nelem_y + 1] = {};
 int nFluxNodes = 0;
-for(int i = 0; i < nelem_x + 1; i++){
-    vFluxNodes[i] = vNodeTopo[nelem_y][i];  // Nodes at the top edge of the beam
-    nFluxNodes += 1;  // Number of nodes on the top edge of the beam
+for(int i = 0; i < nelem_y + 1; i++){
+    vFluxNodes[i] = vNodeTopo[0][i]; // Nodes at the bottom edge of the beam
+    nFluxNodes += 1;  // Number of nodes on the bottom edge of the beam
 }
 
 /**
 *Defining load
 */
-int q = 2500; // Constant flux at top edge of the beam
+int q = 2500; // Constant flux at bottom edge of the beam
 double vN_bc[4][nFluxNodes-1];
 for(int i = 0; i < nFluxNodes - 1; i++){
     vN_bc[0][i] = vFluxNodes[i];   // Node 1
@@ -107,12 +107,12 @@ for(int i = 0; i < nFluxNodes - 1; i++){
 * Essential boundary conditions
 *
 */
-int vTempNodes[nelem_x + 1] = {};
-for(int i = 0; i < nelem_x+1; i++){
-    vTempNodes[i] = vNodeTopo[0][i]; // Nodes at the bottom edge of the beam
+int vTempNodes[nelem_y+1] = {};
+for(int i = 0; i < nelem_y+1; i++){
+    vTempNodes[i] = vNodeTopo[i][0]; // Nodes at the left edge of the beam
 }
 
-int nTempNodes = nelem_x + 1; // NUmber of nodes with temp boundary condition
+int nTempNodes = nelem_y + 1; // NUmber of nodes with temp boundary condition
 
 double vBC[nTempNodes*2] = {}; // Initialize the nodal temperature vector
 int T0 = 10; // Temperature at boundary
@@ -262,6 +262,7 @@ for(int i = 0, m = 0, n = 0; i < nDof; i++){
         vF[i] = vF_F[n++];
 
 }
+
 
 return 0;
 }

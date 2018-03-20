@@ -156,45 +156,46 @@ for(int j = 0; j < nDof; j++){
 *  Partition matrices
 *
 */
-int mask_E = nTempNodes; // Known temperature Dof
-int mmask_E = nDof - nTempNodes;
-double vT_E[mask_E] = {};
-double vF_F[mmask_E] = {};
-double vK_EE[mask_E * mask_E] = {};
-double vK_FF[mmask_E * mmask_E] = {};
-double vK_EF[mask_E * mmask_E] = {};
-double vK_EFT[mmask_E * mask_E] = {};
-
-for(int i = 0; i < mask_E; i++){
-    vT_E[i] = vT[i];
-}
-
-for(int i = 0; i < mmask_E; i++){
-    vF_F[i] = vF[i + mask_E];
-}
-
-for(int i = 0; i < mask_E; i++){
-    for(int j = 0; j < mask_E; j++){
-        vK_EE[i * mask_E + j] = vK[i * nDof + j];
+int lenT = sizeof(vT) / sizeof(vT[0]);
+bool *mask_E = new bool[lenT];
+int ee = 0;
+for(int i = 0; i < lenT; i++){
+    mask_E[i] = 0;
+    for(int j = 0; j < nTempNodes; j++){
+        if(i == vTempNodes[j]){
+            mask_E[i] = 1;  // Known temperature Dof
+            ee++;
+            break;
+        }
     }
 }
 
-for(int i = 0; i < mmask_E; i++){
-    for(int j = 0; j < mmask_E; j++){
-        vK_FF[i * mmask_E + j] = vK[(i + mask_E) * nDof + (j + mask_E)];
-    }
+double vT_E[ee] = {};
+double vF_F[nDof - ee] = {};
+for(int i = 0, j = 0, k = 0; i < nDof; i++){
+    if(mask_E[i] == 1)
+        vT_E[j++] = vT[i];
+    else
+        vF_F[k++] = vF[i];
 }
 
-for(int i = 0; i < mask_E; i++){
-    for(int j = 0; j < mmask_E; j++){
-        vK_EF[i * mmask_E + j] = vK[i * nDof + (j + mask_E)];
-    }
-}
-
-for(int i = 0; i < mmask_E; i++){
-    for(int j = 0; j < mask_E; j++){
-        vK_EFT[i * mask_E + j] = vK_EF[j * mmask_E + i];
-    }
+double vK_EE[ee * ee] = {};
+double vK_FF[(nDof - ee) * (nDof - ee)] = {};
+double vK_EF[ee * (nDof - ee)] = {};
+for(int i = 0, k = 0, m = 0, n = 0; i < nDof; i++){
+    if(mask_E[i] == 1)
+        for(int j = 0; j < nDof; j++){
+            if(mask_E[j] == 1)
+                vK_EE[k++] = vK[i * nDof + j];
+            else
+                vK_EF[m++] = vK[i * nDof + j];
+        }
+    else
+        for(int l = 0; l < nDof; l++){
+            if(mask_E[l] == 0){
+                vK_FF[n++] = vK[i * nDof + l];
+            }
+        }
 }
 
 /**
@@ -202,18 +203,24 @@ for(int i = 0; i < mmask_E; i++){
 * Solve for d_F
 *
 */
-double vRhs[mmask_E] = {};
-double vA[mmask_E] = {};
-cblas_dgemv(CblasRowMajor, CblasNoTrans, mmask_E, mask_E, 1.0, vK_EFT, mask_E, vT_E, 1, 0.0, vA, 1);
-for(int i = 0; i < mmask_E; i++){
+double vRhs[nDof - ee] = {};
+double vA[nDof - ee] = {};
+double vK_EFT[(nDof - ee) * ee] = {};
+for(int i = 0; i < nDof - ee; i++){
+    for(int j = 0; j < ee; j++){
+        vK_EFT[i * ee + j] = vK_EF[j * (nDof - ee) + i];
+    }
+}
+cblas_dgemv(CblasRowMajor, CblasNoTrans, nDof - ee, ee, 1.0, vK_EFT, ee, vT_E, 1, 0.0, vA, 1);
+for(int i = 0; i < nDof - ee; i++){
     vRhs[i] = vF_F[i] - vA[i];
 }
 
-double vT_F[mmask_E] = {};
-int vIpiv[mmask_E] = {};
+double vT_F[nDof - ee] = {};
+int vIpiv[nDof - ee] = {};
 int info = 0;
-F77NAME(dgesv)(mmask_E, 1, vK_FF, mmask_E, vIpiv, vRhs, mmask_E, info);
-for(int i = 0; i < mmask_E; i++){
+F77NAME(dgesv)(nDof - ee, 1, vK_FF, nDof - ee, vIpiv, vRhs, nDof - ee, info);
+for(int i = 0; i < nDof - ee; i++){
     vT_F[i] = vRhs[i];
 }
 
@@ -222,11 +229,11 @@ for(int i = 0; i < mmask_E; i++){
 *Reconstruct the global displacement d
 *
 */
-for(int i = 0; i < mask_E; i++){
-    vT[i] = vT_E[i];
-}
-for(int i = 0; i < mmask_E; i++){
-    vT[i + mask_E] = vT_F[i];
+for(int i = 0, m = 0, n = 0; i < nDof; i++){
+    if(mask_E[i] == 1)
+        vT[i] = vT_E[m++];
+    else
+        vT[i] = vT_F[n++];
 }
 
 /**
@@ -234,12 +241,12 @@ for(int i = 0; i < mmask_E; i++){
 *Compute the reaction f_E
 *
 */
-double vB[mask_E];
-double vC[mask_E];
-double vF_E[mask_E];
-cblas_dgemv(CblasRowMajor, CblasNoTrans, mask_E, mask_E,1.0, vK_EE, mask_E, vT_E, 1, 0.0, vB, 1);
-cblas_dgemv(CblasRowMajor, CblasNoTrans, mask_E, mmask_E, 1.0, vK_EF, mmask_E, vT_F, 1, 0.0, vC, 1);
-for(int i = 0; i < mask_E; i++){
+double vB[ee];
+double vC[ee];
+double vF_E[ee];
+cblas_dgemv(CblasRowMajor, CblasNoTrans, ee, ee,1.0, vK_EE, ee, vT_E, 1, 0.0, vB, 1);
+cblas_dgemv(CblasRowMajor, CblasNoTrans, ee, nDof - ee, 1.0, vK_EF, nDof - ee, vT_F, 1, 0.0, vC, 1);
+for(int i = 0; i < ee; i++){
     vF_E[i] = vB[i] + vC[i];
 }
 
@@ -248,12 +255,14 @@ for(int i = 0; i < mask_E; i++){
 *Reconstruct the global reactions f
 *
 */
-for(int i = 0; i < mask_E; i++){
-    vF[i] = vF_E[i];
+for(int i = 0, m = 0, n = 0; i < nDof; i++){
+    if(mask_E[i] == 1)
+        vF[i] = vF_E[m++];
+    else
+        vF[i] = vF_F[n++];
+
 }
-for(int i = 0; i < mmask_E; i++){
-    vF[i + mask_E] = vF_F[i];
-}
+
 
 return 0;
 }
